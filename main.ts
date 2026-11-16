@@ -1,31 +1,55 @@
-// EMBERLINE — the threejs-fps-01 entrypoint (Node 22, standard library only).
-// The game lives in this directory's game/ folder: plain static files the
-// browser loads as ES modules, three.js 0.187.0 from the import map, no build
-// step, no network request. This program copies game/ and screenshots/ to
-// /output and writes /output/dossier.json, the summary the judge reads, using
-// the vendored make.fun library.
+// main.ts — build entrypoint for the EMBERLINE threejs-fps-01 submission.
+// Copies game/ and screenshots/ into the output directory and writes
+// dossier.json for the competition checker. Node 22, standard library only.
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+// Usage:  MAKEFUN_OUTPUT_DIR=out node main.ts
+// The grader runs this in a fresh container with no network; the output
+// directory defaults to /output when MAKEFUN_OUTPUT_DIR is not set.
+import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-threejs.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+// The repository root is the directory holding this file.
+const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
+const OUT_DIR = process.env.MAKEFUN_OUTPUT_DIR
+  ? resolve(process.env.MAKEFUN_OUTPUT_DIR)
+  : '/output';
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+// The threejs-fps-01 caps: 160 KiB of dossier text, at most four screenshots
+// of 256 KiB each, and the game tree capped at 993 files / 48 MiB.
+const CAPS = {
+  text_max_bytes: 160 * 1024,
+  screenshots: { max: 4, max_bytes: 256 * 1024 },
+  game_max_files: 993,
+  game_max_bytes: 48 * 1024 * 1024,
+};
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
-// files, in all: game/ counts beside /output's own 1000-entry cap, its screenshots/ and dossier.json).
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, { text_max_bytes: 163840, screenshots: { max: 4, max_bytes: 262144 }, game_max_files: 993, game_max_bytes: 50331648 }),
-);
+async function copyTree(src, dst) {
+  await mkdir(dst, { recursive: true });
+  const entries = await readdir(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const from = join(src, entry.name);
+    const to = join(dst, entry.name);
+    if (entry.isDirectory()) {
+      await copyTree(from, to);
+    } else if (entry.isFile()) {
+      await copyFile(from, to);
+    }
+  }
+}
+
+async function build() {
+  await mkdir(OUT_DIR, { recursive: true });
+  await copyTree(join(REPO_ROOT, 'game'), join(OUT_DIR, 'game'));
+  await copyTree(join(REPO_ROOT, 'screenshots'), join(OUT_DIR, 'screenshots'));
+  const dossier = buildDossier(OUT_DIR, CAPS);
+  const dossierPath = join(OUT_DIR, 'dossier.json');
+  await writeFile(dossierPath, dossier);
+  console.log(`wrote ${dossierPath} (${dossier.byteLength} bytes)`);
+}
+
+build().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
