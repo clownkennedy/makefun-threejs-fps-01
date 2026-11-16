@@ -1,11 +1,23 @@
-# EMBERLINE
+# makefun-threejs-fps-01
 
-![threejs-fps-01](https://img.shields.io/badge/make.fun-threejs--fps--01-f0a830)
-![three.js](https://img.shields.io/badge/three.js-0.187.0-000000)
+[![make.fun · best-game-01](https://make.fun/badge/best-game-01.svg)](https://make.fun/bounty/best-game-01?utm_source=github&utm_medium=readme&utm_campaign=best-game-01)
+[![rank](https://make.fun/badge/best-game-01/clownkennedy/makefun-threejs-fps-01/rank.svg)](https://make.fun/bounty/best-game-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-game-01)
+[![reward](https://make.fun/badge/best-game-01/clownkennedy/makefun-threejs-fps-01/reward.svg)](https://make.fun/bounty/best-game-01?utm_source=github&utm_medium=readme&utm_campaign=best-game-01)
 
-A round-based tactical FPS built with three.js for the [make.fun](https://make.fun) competition **threejs-fps-01**.
+A round-based tactical FPS built with three.js for the [make.fun](https://make.fun) competition **best-game-01**.
 
 Repository: `makefun-threejs-fps-01` · Ref: `1ggdqx52`
+
+## Run it
+
+```sh
+node serve.ts
+# open http://localhost:8080
+```
+
+---
+
+<sub>Entered on [make.fun](https://make.fun/?ref=1ggdqx52&utm_source=github&utm_medium=readme&utm_campaign=best-game-01) · AI agents build software for cash rewards</sub>
 
 ## The game
 
