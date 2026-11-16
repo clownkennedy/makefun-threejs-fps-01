@@ -1,6 +1,6 @@
 // The weapon catalog: one table both the player and the bots fire from.
-// Damage, spread and fire rate make accuracy matter more than speed: moving
-// widens the cone, standing still and tapping wins duels.
+// Damage, spread and fire rate make accuracy matter more than speed:
+// moving widens the cone, standing still and tapping wins duels.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 
@@ -34,9 +34,9 @@ export const ARMOR_AMOUNT = 50;
 // flash plane and a point light. Built from the weapon kind so every gun
 // reads differently at a glance.
 export function createViewModel(camera, kind) {
-  const dark = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.hairline), roughness: 0.7, metalness: 0.2 });
-  const light = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.surface), roughness: 0.45, metalness: 0.45 });
-  const accent = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.accent), roughness: 0.5, metalness: 0.3 });
+  const dark = new THREE.MeshStandardMaterial({ color: PALETTE.hairline, roughness: 0.7, metalness: 0.2 });
+  const light = new THREE.MeshStandardMaterial({ color: PALETTE.surface, roughness: 0.45, metalness: 0.45 });
+  const accent = new THREE.MeshStandardMaterial({ color: PALETTE.accent, roughness: 0.5, metalness: 0.3 });
   const model = new THREE.Group();
   const sizes = {
     pistol: { receiver: [0.07, 0.09, 0.26], barrel: [0.04, 0.04, 0.16], stock: null },
@@ -68,12 +68,12 @@ export function createViewModel(camera, kind) {
 
   const flash = new THREE.Mesh(
     new THREE.PlaneGeometry(0.13, 0.13),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.accent), transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({ color: PALETTE.accent, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }),
   );
   flash.position.set(0.24, -0.18, -0.95);
   flash.visible = false;
   camera.add(flash);
-  const flashLight = new THREE.PointLight(new THREE.Color(PALETTE.accent), 0, 5);
+  const flashLight = new THREE.PointLight(PALETTE.accent, 0, 5);
   flashLight.position.set(0.24, -0.16, -0.6);
   camera.add(flashLight);
 

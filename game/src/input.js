@@ -1,63 +1,83 @@
-// Keyboard and mouse, and the pointer lock that turns the mouse into look.
-// Plain browser APIs only. Also tracks pressed-once keys (buy menu, plant, etc.).
-export function createInput(canvas, onLockChange) {
+// Keyboard + mouse input for EMBERLINE: pointer lock, look deltas, key state.
+// The game reads this every fixed step; the DOM layer never touches keys.
+export function createInput(canvas) {
   const keys = new Set();
-  const pressed = new Set();
-  const state = { keys, locked: false, firing: false, lookX: 0, lookY: 0, altFire: false };
+  let lookX = 0;
+  let lookY = 0;
+  let attack = false;
+  let locked = false;
+  let onLockChange = null;
 
-  function setKey(event, down) {
-    if (down) {
-      if (!keys.has(event.code)) pressed.add(event.code);
-      keys.add(event.code);
-    } else keys.delete(event.code);
-    if (event.code === 'Space' || event.code === 'Tab') event.preventDefault();
+  function keyDown(e) {
+    if (e.code === 'Tab') e.preventDefault();
+    if (e.repeat) return;
+    keys.add(e.code);
+  }
+  function keyUp(e) {
+    keys.delete(e.code);
+  }
+  function mouseMove(e) {
+    if (!locked) return;
+    lookX += e.movementX || 0;
+    lookY += e.movementY || 0;
+  }
+  function mouseDown(e) {
+    if (e.button === 0) attack = true;
+  }
+  function mouseUp(e) {
+    if (e.button === 0) attack = false;
+  }
+  function lockChange() {
+    locked = document.pointerLockElement === canvas;
+    if (!locked) attack = false;
+    if (onLockChange) onLockChange(locked);
+  }
+  function blur() {
+    keys.clear();
+    attack = false;
   }
 
-  window.addEventListener('keydown', (event) => setKey(event, true));
-  window.addEventListener('keyup', (event) => setKey(event, false));
-  window.addEventListener('blur', () => { keys.clear(); state.firing = false; });
-  window.addEventListener('mousemove', (event) => {
-    if (!state.locked) return;
-    state.lookX += event.movementX;
-    state.lookY += event.movementY;
-  });
-  window.addEventListener('mousedown', (event) => {
-    if (!state.locked) return;
-    if (event.button === 0) state.firing = true;
-    if (event.button === 2) state.altFire = true;
-  });
-  window.addEventListener('mouseup', (event) => {
-    if (event.button === 0) state.firing = false;
-    if (event.button === 2) state.altFire = false;
-  });
-  window.addEventListener('contextmenu', (event) => {
-    if (state.locked) event.preventDefault();
-  });
-  document.addEventListener('pointerlockchange', () => {
-    state.locked = document.pointerLockElement === canvas;
-    if (!state.locked) {
-      keys.clear();
-      state.firing = false;
-      state.altFire = false;
-    }
-    onLockChange(state.locked);
-  });
+  window.addEventListener('keydown', keyDown);
+  window.addEventListener('keyup', keyUp);
+  window.addEventListener('mousemove', mouseMove);
+  window.addEventListener('mousedown', mouseDown);
+  window.addEventListener('mouseup', mouseUp);
+  document.addEventListener('pointerlockchange', lockChange);
+  window.addEventListener('blur', blur);
 
   return {
-    state,
-    requestLock() { canvas.requestPointerLock(); },
-    exitLock() { if (document.pointerLockElement) document.exitPointerLock(); },
-    takeLook() {
-      const x = state.lookX;
-      const y = state.lookY;
-      state.lookX = 0;
-      state.lookY = 0;
-      return { x, y };
+    get locked() { return locked; },
+    get attack() { return attack; },
+    requestLock() {
+      canvas.requestPointerLock();
     },
-    takePressed() {
-      const out = new Set(pressed);
-      pressed.clear();
+    exitLock() {
+      if (document.pointerLockElement) document.exitPointerLock();
+    },
+    set onLockChange(fn) { onLockChange = fn; },
+    down(code) { return keys.has(code); },
+    pressed(code) {
+      // one-shot: true once per physical press until the key is released
+      if (keys.has(code)) {
+        keys.delete(code);
+        return true;
+      }
+      return false;
+    },
+    takeLook() {
+      const out = { dx: lookX, dy: lookY };
+      lookX = 0;
+      lookY = 0;
       return out;
+    },
+    dispose() {
+      window.removeEventListener('keydown', keyDown);
+      window.removeEventListener('keyup', keyUp);
+      window.removeEventListener('mousemove', mouseMove);
+      window.removeEventListener('mousedown', mouseDown);
+      window.removeEventListener('mouseup', mouseUp);
+      document.removeEventListener('pointerlockchange', lockChange);
+      window.removeEventListener('blur', blur);
     },
   };
 }

@@ -1,242 +1,212 @@
-// EMBERLINE — the map: "Ember Yard", an original industrial container yard.
-// Two bomb sites (A FURNACE west, B DEPOT east), a mid lane, side lanes and
-// a gantry platform. Every box is a collider for movement and a surface a
-// bullet stops on. Plain geometry only, no models, no textures from the net;
-// site letters are drawn on a canvas at runtime.
+// The Ember Yard: a 44 x 36 metre arena with two bomb sites, cover and a
+// waypoint graph the bots patrol on. All collision is axis-aligned boxes;
+// movement resolves per axis so players slide along walls instead of sticking.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 
-// [width, height, depth, x, y, z, material]
-const BOXES = [
-  // ground + outer walls (44 x 36 m, 5 m walls)
-  [44.4, 0.4, 36.4, 0, -0.2, 0, 'ground'],
-  [0.4, 5.0, 36.4, -22.2, 2.5, 0, 'surface'],
-  [0.4, 5.0, 36.4, 22.2, 2.5, 0, 'surface'],
-  [44.4, 5.0, 0.4, 0, 2.5, -18.2, 'surface'],
-  [44.4, 5.0, 0.4, 0, 2.5, 18.2, 'surface'],
-  // mid containers — the two lanes split here
-  [6.0, 2.6, 2.4, -8, 1.3, 2, 'rust'],
-  [6.0, 2.6, 2.4, 8, 1.3, 2, 'rust'],
-  // central pillar + gantry platform (jump up, 0.5 m)
-  [1.2, 3.4, 1.2, 3.5, 1.7, -2, 'hairline'],
-  [6.0, 0.5, 4.0, 0, 0.25, -10, 'surface'],
-  // low walls near attacker spawn
-  [3.6, 1.1, 1.2, -4.5, 0.55, 8.5, 'hairline'],
-  [3.6, 1.1, 1.2, 4.5, 0.55, 8.5, 'hairline'],
-  // crates
-  [1.2, 1.2, 1.2, -4, 0.6, -4, 'hairline'],
-  [1.2, 1.2, 1.2, 4, 0.6, -4, 'hairline'],
-  [1.2, 1.2, 1.2, -10, 0.6, 9.5, 'hairline'],
-  [1.2, 1.2, 1.2, 10, 0.6, 9.5, 'hairline'],
-  [1.2, 1.2, 1.2, -19, 0.6, -0.5, 'rust'],
-  [1.2, 1.2, 1.2, 19, 0.6, -0.5, 'rust'],
-  [1.6, 0.7, 1.6, -20, 0.35, -4, 'hairline'],
-  [1.6, 0.7, 1.6, 20, 0.35, -4, 'hairline'],
-  [2.4, 0.9, 1.2, -2.5, 0.45, 12.5, 'hairline'],
-  [2.4, 0.9, 1.2, 2.5, 0.45, 12.5, 'hairline'],
-  // site A cover (FURNACE, west)
-  [4.8, 2.4, 1.2, -18.5, 1.2, -9, 'rust'],
-  [1.2, 2.4, 4.8, -12.5, 1.2, -14.5, 'rust'],
-  [1.2, 1.2, 1.2, -17.5, 0.6, -14.5, 'hairline'],
-  // site B cover (DEPOT, east)
-  [4.8, 2.4, 1.2, 18.5, 1.2, -9, 'surface'],
-  [1.2, 2.4, 4.8, 12.5, 1.2, -14.5, 'surface'],
-  [1.2, 1.2, 1.2, 17.5, 0.6, -14.5, 'hairline'],
-  // defender back cover
-  [3.0, 1.1, 1.2, -6, 0.55, -15.5, 'hairline'],
-  [3.0, 1.1, 1.2, 6, 0.55, -15.5, 'hairline'],
+export const ARENA = { halfX: 22, halfZ: 18, wallH: 4 };
+
+export const SITES = [
+  { name: 'A', label: 'FURNACE', x: -15, z: -9, r: 3.5, color: PALETTE.siteA },
+  { name: 'B', label: 'DEPOT', x: 15, z: -9, r: 3.5, color: PALETTE.siteB },
 ];
 
-const WAYPOINTS = [
-  { x: 0, z: 15, links: [1, 11, 12] }, // 0 ember spawn
-  { x: 0, z: 8, links: [0, 2, 3, 4] }, // 1 ember mid
-  { x: -8, z: 4, links: [1, 15, 11] }, // 2 mid west
-  { x: 8, z: 4, links: [1, 16, 12] }, // 3 mid east
-  { x: 0, z: -1, links: [1, 5, 9] }, // 4 mid centre
-  { x: -11, z: -5, links: [15, 4, 6, 13] }, // 5 A approach
-  { x: -16, z: -13, links: [5, 9] }, // 6 site A
-  { x: 11, z: -5, links: [16, 9, 8, 14] }, // 7 B approach
-  { x: 16, z: -13, links: [7, 9] }, // 8 site B
-  { x: 0, z: -5.5, links: [4, 6, 7, 8, 13, 14] }, // 9 defender mid
-  { x: 0, z: -15, links: [13, 14] }, // 10 ash spawn
-  { x: -15, z: 9, links: [0, 2, 13] }, // 11 west lane
-  { x: 15, z: 9, links: [0, 3, 14] }, // 12 east lane
-  { x: -19, z: -6, links: [5, 10, 11, 15] }, // 13 A back
-  { x: 19, z: -6, links: [7, 10, 12, 16] }, // 14 B back
-  { x: -14, z: 4, links: [2, 5, 13] }, // 15 west bypass (around the mid container)
-  { x: 14, z: 4, links: [3, 7, 14] }, // 16 east bypass (around the mid container)
+export const SPAWNS = {
+  ember: [
+    { x: -6, z: 14 }, { x: 0, z: 15 }, { x: 6, z: 14 },
+    { x: -12, z: 12 }, { x: 12, z: 12 }, { x: 0, z: 11 },
+  ],
+  ash: [
+    { x: -6, z: -14 }, { x: 0, z: -15 }, { x: 6, z: -14 },
+    { x: -12, z: -12 }, { x: 12, z: -12 }, { x: 0, z: -11 },
+  ],
+};
+
+// Waypoint nodes the bots walk between. Each node lists its neighbours;
+// the graph covers both sites, mid and both spawns, with bypasses around
+// the big cover blocks so no route dead-ends inside geometry.
+export const WAYPOINTS = [
+  { x: -6, z: 14, links: [1, 3] },       // 0 ember spawn west
+  { x: 6, z: 14, links: [0, 2] },        // 1 ember spawn east
+  { x: 0, z: 11, links: [1, 3, 4] },     // 2 ember spawn mid
+  { x: -11, z: 6, links: [0, 2, 5] },    // 3 west lane south
+  { x: 11, z: 6, links: [1, 2, 6] },     // 4 east lane south
+  { x: -14, z: -2, links: [3, 7, 9] },   // 5 west lane
+  { x: 14, z: -2, links: [4, 8, 10] },   // 6 east lane
+  { x: -15, z: -9, links: [5, 9] },      // 7 site A
+  { x: 15, z: -9, links: [6, 10] },      // 8 site B
+  { x: -6, z: -6, links: [5, 7, 11] },   // 9 mid west
+  { x: 6, z: -6, links: [6, 8, 11] },    // 10 mid east
+  { x: 0, z: -5, links: [9, 10, 12] },   // 11 mid
+  { x: 0, z: -11, links: [11, 13, 14] }, // 12 ash approach
+  { x: -6, z: -14, links: [12, 14] },    // 13 ash spawn west
+  { x: 6, z: -14, links: [12, 13] },     // 14 ash spawn east
 ];
 
-export function createWorld(scene) {
-  const group = new THREE.Group();
-  scene.add(group);
-  const materials = {};
-  for (const name of Object.keys(PALETTE)) {
-    materials[name] = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(PALETTE[name]),
-      roughness: name === 'accent' || name === 'ink' ? 0.55 : 0.92,
-      metalness: 0.03,
-    });
+// Cover blocks: {x0, z0, x1, z1, h} axis-aligned boxes. The four walls are
+// added by createWorld; these are the interior blocks.
+export const BLOCKS = [
+  { x0: -21, z0: -4, x1: -18, z1: 2, h: 2.2 },    // west mid crate
+  { x0: 18, z0: -4, x1: 21, z1: 2, h: 2.2 },     // east mid crate
+  { x0: -8, z0: -1, x1: -5, z1: 2, h: 1.6 },     // mid west low crate
+  { x0: 5, z0: -1, x1: 8, z1: 2, h: 1.6 },       // mid east low crate
+  { x0: -17, z0: -13, x1: -13, z1: -11, h: 2.6 },// site A stack
+  { x0: 13, z0: -13, x1: 17, z1: -11, h: 2.6 },  // site B stack
+  { x0: -3, z0: -14, x1: 3, z1: -12, h: 2.2 },   // north centre block
+  { x0: -12, z0: 8, x1: -9, z1: 11, h: 1.8 },    // south west crate
+  { x0: 9, z0: 8, x1: 12, z1: 11, h: 1.8 },      // south east crate
+  { x0: -2, z0: 4, x1: 2, z1: 6, h: 3.0 },       // mid pillar
+];
+
+function pointInBlock(x, z, b, pad) {
+  return x > b.x0 - pad && x < b.x1 + pad && z > b.z0 - pad && z < b.z1 + pad;
+}
+
+export function makeMover(blocks, radius) {
+  const all = blocks;
+  function blocked(x, z) {
+    if (Math.abs(x) > ARENA.halfX - radius - 0.5) return true;
+    if (Math.abs(z) > ARENA.halfZ - radius - 0.5) return true;
+    for (const b of all) {
+      if (pointInBlock(x, z, b, radius)) return true;
+    }
+    return false;
   }
-  const colliders = [];
-  const shootables = [];
-  const footprints = [];
-
-  function box(w, h, d, x, y, z, material) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), materials[material]);
-    mesh.position.set(x, y, z);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-    colliders.push(new THREE.Box3().setFromObject(mesh));
-    shootables.push(mesh);
-    footprints.push({ x, z, w, d });
-    return mesh;
-  }
-  for (const b of BOXES) box(...b);
-
-  // Painted ground lines: mid line + site zones (thin planes, no collision).
-  function decal(w, d, x, z, color, opacity) {
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(w, d),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity, depthWrite: false }),
-    );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(x, 0.02, z);
-    mesh.receiveShadow = true;
-    group.add(mesh);
-  }
-  decal(0.25, 30, 0, 0, PALETTE.gold, 0.5); // mid line
-  decal(7, 7, -16, -11.5, PALETTE.accent, 0.16); // site A zone
-  decal(7, 7, 16, -11.5, PALETTE.ash, 0.16); // site B zone
-
-  // Floating site letters, drawn on a canvas at runtime (no image files).
-  function letterSprite(letter, color, x, y, z) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = color;
-    ctx.font = 'bold 92px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(letter, 64, 68);
-    const texture = new THREE.CanvasTexture(canvas);
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
-    sprite.scale.set(2.2, 2.2, 1);
-    sprite.position.set(x, y, z);
-    group.add(sprite);
-    return sprite;
-  }
-  const siteA = letterSprite('A', PALETTE.accent, -16, 4.6, -11.5);
-  const siteB = letterSprite('B', PALETTE.ash, 16, 4.6, -11.5);
-
-  // Floodlight poles at the corners.
-  const poleMaterial = materials.hairline;
-  for (const [x, z] of [[-20, 16], [20, 16], [-20, -16], [20, -16]]) {
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 6.4, 8), poleMaterial);
-    pole.position.set(x, 3.2, z);
-    pole.castShadow = true;
-    group.add(pole);
-    const head = new THREE.Mesh(
-      new THREE.BoxGeometry(0.7, 0.22, 0.3),
-      new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.ink), emissive: new THREE.Color(PALETTE.ink), emissiveIntensity: 1.4 }),
-    );
-    head.position.set(x, 6.5, z);
-    group.add(head);
-  }
-
-  // Distant skyline silhouettes outside the walls.
-  for (let i = 0; i < 10; i += 1) {
-    const w = 6 + (i % 3) * 4;
-    const h = 8 + ((i * 7) % 10);
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 4), materials.canvas);
-    const angle = (i / 10) * Math.PI * 2;
-    mesh.position.set(Math.cos(angle) * 42, h / 2 - 0.5, Math.sin(angle) * 38);
-    group.add(mesh);
-  }
-
-  // Light: dusk hemisphere, warm key, cool fill, site glows.
-  const sky = new THREE.HemisphereLight(new THREE.Color('#3a4a5c'), new THREE.Color(PALETTE.ground), 1.15);
-  scene.add(sky);
-  const key = new THREE.DirectionalLight(new THREE.Color('#ffd9a0'), 1.9);
-  key.position.set(14, 22, 12);
-  key.target.position.set(0, 0, -4);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.left = -26;
-  key.shadow.camera.right = 26;
-  key.shadow.camera.top = 24;
-  key.shadow.camera.bottom = -24;
-  key.shadow.camera.far = 70;
-  key.shadow.bias = -0.0006;
-  scene.add(key, key.target);
-  const fill = new THREE.DirectionalLight(new THREE.Color('#7fa8c9'), 0.65);
-  fill.position.set(-12, 14, 16);
-  scene.add(fill);
-  const glowA = new THREE.PointLight(new THREE.Color(PALETTE.accent), 14, 14);
-  glowA.position.set(-16, 3.4, -11.5);
-  scene.add(glowA);
-  const glowB = new THREE.PointLight(new THREE.Color(PALETTE.ash), 14, 14);
-  glowB.position.set(16, 3.4, -11.5);
-  scene.add(glowB);
-
   return {
-    colliders,
-    shootables,
-    footprints,
-    group,
-    siteA,
-    siteB,
-    bounds: { minX: -22, maxX: 22, minZ: -18, maxZ: 18 },
-    sites: [
-      { id: 'A', name: 'FURNACE', center: new THREE.Vector3(-16, 0, -11.5), radius: 3.4, color: PALETTE.accent },
-      { id: 'B', name: 'DEPOT', center: new THREE.Vector3(16, 0, -11.5), radius: 3.4, color: PALETTE.ash },
-    ],
-    spawns: {
-      ember: [new THREE.Vector3(0, 0, 15), new THREE.Vector3(-3, 0, 15.5), new THREE.Vector3(3, 0, 15.5)],
-      ash: [new THREE.Vector3(0, 0, -15), new THREE.Vector3(-4, 0, -15.5), new THREE.Vector3(4, 0, -15.5), new THREE.Vector3(-8, 0, -14), new THREE.Vector3(8, 0, -14)],
+    blocked,
+    // Move a circle step by step, axis by axis, so it slides along walls.
+    move(pos, dx, dz) {
+      const nx = pos.x + dx;
+      if (!blocked(nx, pos.z)) pos.x = nx;
+      const nz = pos.z + dz;
+      if (!blocked(pos.x, nz)) pos.z = nz;
     },
-    waypoints: WAYPOINTS.map((w) => ({ pos: new THREE.Vector3(w.x, 0, w.z), links: w.links })),
   };
 }
 
-// Breadth-first path over the waypoint graph. Returns an array of waypoint
-// indices from `from` to `to` (excluding `from`, including `to`).
-export function findPath(waypoints, from, to) {
+// Line of sight between two points at eye height: sample the segment and
+// report blocked when a tall-enough block crosses it.
+export function hasLineOfSight(a, b, blocks, eyeH = 1.4) {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const dist = Math.hypot(dx, dz);
+  const steps = Math.max(1, Math.ceil(dist / 0.5));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const x = a.x + dx * t;
+    const z = a.z + dz * t;
+    for (const blk of blocks) {
+      if (blk.h >= 1.2 && pointInBlock(x, z, blk, 0)) return false;
+    }
+  }
+  return true;
+}
+
+export function nearestNode(x, z) {
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < WAYPOINTS.length; i++) {
+    const d = (WAYPOINTS[i].x - x) ** 2 + (WAYPOINTS[i].z - z) ** 2;
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+// Breadth-first path over the waypoint graph, as a list of node indices.
+export function findPath(from, to) {
   if (from === to) return [to];
-  const prev = new Array(waypoints.length).fill(-1);
+  const prev = new Array(WAYPOINTS.length).fill(-1);
   const queue = [from];
   prev[from] = from;
-  while (queue.length > 0) {
-    const current = queue.shift();
-    for (const next of waypoints[current].links) {
-      if (prev[next] !== -1) continue;
-      prev[next] = current;
-      if (next === to) {
-        const path = [to];
-        let node = to;
-        while (prev[node] !== node) {
-          node = prev[node];
-          path.unshift(node);
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const nb of WAYPOINTS[cur].links) {
+      if (prev[nb] === -1) {
+        prev[nb] = cur;
+        if (nb === to) {
+          const path = [to];
+          let n = to;
+          while (n !== from) { n = prev[n]; path.unshift(n); }
+          return path;
         }
-        return path.slice(1);
+        queue.push(nb);
       }
-      queue.push(next);
     }
   }
   return [to];
 }
 
-export function nearestWaypoint(waypoints, pos) {
-  let best = 0;
-  let bestD = Infinity;
-  for (let i = 0; i < waypoints.length; i += 1) {
-    const d = waypoints[i].pos.distanceToSquared(pos);
-    if (d < bestD) {
-      bestD = d;
-      best = i;
-    }
+export function createWorld(scene) {
+  const group = new THREE.Group();
+  const groundMat = new THREE.MeshStandardMaterial({ color: PALETTE.ground, roughness: 0.95, metalness: 0 });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(ARENA.halfX * 2 + 2, ARENA.halfZ * 2 + 2), groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  group.add(ground);
+
+  // Faint grid lines painted onto a canvas texture so the floor reads.
+  const gridCanvas = document.createElement('canvas');
+  gridCanvas.width = 256;
+  gridCanvas.height = 256;
+  const gtx = gridCanvas.getContext('2d');
+  gtx.fillStyle = '#2a2f28';
+  gtx.fillRect(0, 0, 256, 256);
+  gtx.strokeStyle = 'rgba(255,255,255,0.05)';
+  gtx.lineWidth = 1;
+  for (let i = 0; i <= 8; i++) {
+    gtx.beginPath(); gtx.moveTo(i * 32, 0); gtx.lineTo(i * 32, 256); gtx.stroke();
+    gtx.beginPath(); gtx.moveTo(0, i * 32); gtx.lineTo(256, i * 32); gtx.stroke();
   }
-  return best;
+  const gridTex = new THREE.CanvasTexture(gridCanvas);
+  gridTex.wrapS = THREE.RepeatWrapping;
+  gridTex.wrapT = THREE.RepeatWrapping;
+  gridTex.repeat.set(11, 9);
+  ground.material = new THREE.MeshStandardMaterial({ map: gridTex, roughness: 0.95, metalness: 0 });
+
+  const wallMat = new THREE.MeshStandardMaterial({ color: PALETTE.wall, roughness: 0.85, metalness: 0.05 });
+  const wallDefs = [
+    { x: 0, z: -ARENA.halfZ - 0.5, w: ARENA.halfX * 2 + 2, d: 1 },
+    { x: 0, z: ARENA.halfZ + 0.5, w: ARENA.halfX * 2 + 2, d: 1 },
+    { x: -ARENA.halfX - 0.5, z: 0, w: 1, d: ARENA.halfZ * 2 + 2 },
+    { x: ARENA.halfX + 0.5, z: 0, w: 1, d: ARENA.halfZ * 2 + 2 },
+  ];
+  for (const w of wallDefs) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w.w, ARENA.wallH, w.d), wallMat);
+    mesh.position.set(w.x, ARENA.wallH / 2, w.z);
+    group.add(mesh);
+  }
+
+  const crateMat = new THREE.MeshStandardMaterial({ color: PALETTE.crate, roughness: 0.9, metalness: 0.05 });
+  const crateDarkMat = new THREE.MeshStandardMaterial({ color: PALETTE.crateDark, roughness: 0.9, metalness: 0.05 });
+  const pillarMat = new THREE.MeshStandardMaterial({ color: PALETTE.pillar, roughness: 0.8, metalness: 0.1 });
+  BLOCKS.forEach((b, i) => {
+    const w = b.x1 - b.x0;
+    const d = b.z1 - b.z0;
+    const mat = b.h >= 3 ? pillarMat : (i % 2 === 0 ? crateMat : crateDarkMat);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, b.h, d), mat);
+    mesh.position.set((b.x0 + b.x1) / 2, b.h / 2, (b.z0 + b.z1) / 2);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  });
+
+  // Site markers: a glowing ring on the floor plus a floating label plate.
+  for (const site of SITES) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(site.r - 0.25, site.r, 40),
+      new THREE.MeshBasicMaterial({ color: site.color, transparent: true, opacity: 0.55, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(site.x, 0.03, site.z);
+    group.add(ring);
+    const plate = new THREE.Mesh(
+      new THREE.BoxGeometry(2.4, 0.1, 1.2),
+      new THREE.MeshBasicMaterial({ color: site.color }),
+    );
+    plate.position.set(site.x, 3.4, site.z);
+    group.add(plate);
+  }
+
+  scene.add(group);
+  return { group, blocks: BLOCKS };
 }

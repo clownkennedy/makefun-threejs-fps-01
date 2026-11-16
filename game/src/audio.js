@@ -1,109 +1,103 @@
-// Procedural sound: every effect is synthesized with WebAudio, no audio files,
-// no network. Created lazily on the first user gesture; every call is a no-op
-// when there is no audio context (headless screenshots, muted tabs).
+// Procedural sound effects for EMBERLINE, built on plain WebAudio.
+// No audio files are shipped; every sound is synthesized on the fly.
+// The context is created lazily on the first user gesture (pointer lock).
+import { PALETTE } from './palette.js';
+
 export function createAudio() {
   let ctx = null;
   let master = null;
-  let wind = null;
+  let muted = false;
 
   function ensure() {
-    if (ctx) return true;
-    try {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return false;
-      ctx = new AC();
-      master = ctx.createGain();
-      master.gain.value = 0.5;
-      master.connect(ctx.destination);
-    } catch {
-      return false;
+    if (ctx) {
+      if (ctx.state === 'suspended') ctx.resume();
+      return ctx;
     }
-    return true;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    ctx = new AC();
+    master = ctx.createGain();
+    master.gain.value = 0.4;
+    master.connect(ctx.destination);
+    return ctx;
   }
 
-  function noiseBuffer(seconds) {
-    const buffer = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * seconds)), ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
-    return buffer;
-  }
-
-  function burst({ duration, type = 'lowpass', frequency = 1200, gain = 0.5, decay = 0.08 }) {
-    if (!ensure()) return;
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    const t = ctx.currentTime;
-    const source = ctx.createBufferSource();
-    source.buffer = noiseBuffer(duration + 0.05);
-    const filter = ctx.createBiquadFilter();
-    filter.type = type;
-    filter.frequency.value = frequency;
-    const amp = ctx.createGain();
-    amp.gain.setValueAtTime(gain, t);
-    amp.gain.exponentialRampToValueAtTime(0.001, t + decay);
-    source.connect(filter).connect(amp).connect(master);
-    source.start(t);
-    source.stop(t + duration + 0.05);
-  }
-
-  function tone({ frequency, end = null, duration = 0.12, type = 'sine', gain = 0.25, when = 0 }) {
-    if (!ensure()) return;
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    const t = ctx.currentTime + when;
-    const osc = ctx.createOscillator();
-    osc.type = type;
-    osc.frequency.setValueAtTime(frequency, t);
-    if (end !== null) osc.frequency.exponentialRampToValueAtTime(Math.max(1, end), t + duration);
-    const amp = ctx.createGain();
-    amp.gain.setValueAtTime(0.0001, t);
-    amp.gain.exponentialRampToValueAtTime(gain, t + 0.008);
-    amp.gain.exponentialRampToValueAtTime(0.001, t + duration);
-    osc.connect(amp).connect(master);
+  function tone(freq, dur, type, vol, slideTo) {
+    if (muted) return;
+    const ac = ensure();
+    if (!ac) return;
+    const t = ac.currentTime;
+    const osc = ac.createOscillator();
+    const g = ac.createGain();
+    osc.type = type || 'square';
+    osc.frequency.setValueAtTime(freq, t);
+    if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t + dur);
+    g.gain.setValueAtTime(vol || 0.2, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    osc.connect(g);
+    g.connect(master);
     osc.start(t);
-    osc.stop(t + duration + 0.02);
+    osc.stop(t + dur + 0.02);
   }
 
-  return {
+  function noise(dur, vol, lowpass) {
+    if (muted) return;
+    const ac = ensure();
+    if (!ac) return;
+    const t = ac.currentTime;
+    const len = Math.max(1, Math.floor(ac.sampleRate * dur));
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(vol || 0.3, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    let node = src;
+    if (lowpass) {
+      const f = ac.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = lowpass;
+      src.connect(f);
+      node = f;
+    }
+    node.connect(g);
+    g.connect(master);
+    src.start(t);
+  }
+
+  const bank = {
     unlock() { ensure(); },
-    shot(kind) {
-      if (kind === 'smg') burst({ duration: 0.09, frequency: 2600, gain: 0.4, decay: 0.07 });
-      else if (kind === 'dmr') { burst({ duration: 0.22, frequency: 900, gain: 0.65, decay: 0.16 }); tone({ frequency: 160, end: 55, duration: 0.18, type: 'sine', gain: 0.35 }); }
-      else if (kind === 'pistol') burst({ duration: 0.08, frequency: 3200, gain: 0.32, decay: 0.06 });
-      else { burst({ duration: 0.11, frequency: 1800, gain: 0.5, decay: 0.09 }); tone({ frequency: 130, end: 60, duration: 0.1, type: 'sine', gain: 0.22 }); }
+    setMuted(m) { muted = !!m; },
+    get muted() { return muted; },
+    shoot(kind) {
+      if (kind === 'pistol') { noise(0.09, 0.35, 2600); tone(210, 0.07, 'square', 0.14, 90); }
+      else if (kind === 'smg') { noise(0.07, 0.3, 3200); tone(260, 0.05, 'square', 0.11, 120); }
+      else if (kind === 'rifle') { noise(0.11, 0.4, 2200); tone(170, 0.09, 'square', 0.16, 70); }
+      else if (kind === 'dmr') { noise(0.16, 0.5, 1600); tone(130, 0.13, 'square', 0.2, 55); }
+      else noise(0.08, 0.3, 2400);
     },
-    distantShot() { burst({ duration: 0.12, frequency: 700, gain: 0.14, decay: 0.1 }); },
-    hit() { tone({ frequency: 1900, duration: 0.05, type: 'square', gain: 0.12 }); },
-    kill() { tone({ frequency: 660, duration: 0.09, type: 'triangle', gain: 0.22 }); tone({ frequency: 990, duration: 0.12, type: 'triangle', gain: 0.2, when: 0.08 }); },
-    hurt() { tone({ frequency: 220, end: 110, duration: 0.16, type: 'sawtooth', gain: 0.18 }); },
-    reload() { tone({ frequency: 1400, duration: 0.04, type: 'square', gain: 0.1 }); tone({ frequency: 900, duration: 0.04, type: 'square', gain: 0.1, when: 0.18 }); },
-    dryClick() { tone({ frequency: 2400, duration: 0.03, type: 'square', gain: 0.08 }); },
-    plantBeep() { tone({ frequency: 1200, duration: 0.07, type: 'square', gain: 0.16 }); },
-    plantDone() { tone({ frequency: 880, duration: 0.1, type: 'triangle', gain: 0.22 }); tone({ frequency: 1320, duration: 0.14, type: 'triangle', gain: 0.2, when: 0.1 }); },
-    explosion() {
-      burst({ duration: 0.9, frequency: 420, gain: 0.9, decay: 0.85 });
-      tone({ frequency: 90, end: 28, duration: 0.9, type: 'sine', gain: 0.6 });
-    },
-    roundWin() { [523, 659, 784].forEach((f, i) => tone({ frequency: f, duration: 0.16, type: 'triangle', gain: 0.2, when: i * 0.11 })); },
-    roundLose() { [392, 330, 262].forEach((f, i) => tone({ frequency: f, duration: 0.18, type: 'triangle', gain: 0.18, when: i * 0.12 })); },
-    step() { burst({ duration: 0.04, frequency: 500, gain: 0.05, decay: 0.035 }); },
-    buy() { tone({ frequency: 1046, duration: 0.06, type: 'triangle', gain: 0.14 }); tone({ frequency: 1568, duration: 0.08, type: 'triangle', gain: 0.12, when: 0.06 }); },
-    wind(on) {
-      if (!ensure()) return;
-      if (on && !wind) {
-        const source = ctx.createBufferSource();
-        source.buffer = noiseBuffer(2);
-        source.loop = true;
-        const filter = ctx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.value = 320;
-        const amp = ctx.createGain();
-        amp.gain.value = 0.045;
-        source.connect(filter).connect(amp).connect(master);
-        source.start();
-        wind = { source, amp };
-      } else if (!on && wind) {
-        try { wind.source.stop(); } catch { /* already stopped */ }
-        wind = null;
-      }
-    },
+    dryFire() { tone(1400, 0.03, 'square', 0.08); },
+    reload() { tone(500, 0.05, 'square', 0.1); setTimeout(() => tone(760, 0.05, 'square', 0.1), 140); },
+    hit() { tone(1150, 0.05, 'sine', 0.22); },
+    kill() { tone(880, 0.07, 'sine', 0.22); setTimeout(() => tone(1320, 0.1, 'sine', 0.22), 80); },
+    hurt() { tone(140, 0.16, 'sawtooth', 0.22, 60); noise(0.1, 0.18, 900); },
+    buy() { tone(660, 0.06, 'sine', 0.18); setTimeout(() => tone(990, 0.08, 'sine', 0.18), 70); },
+    denied() { tone(220, 0.12, 'square', 0.14, 160); },
+    plantTick() { tone(1050, 0.05, 'sine', 0.16); },
+    planted() { tone(520, 0.12, 'sine', 0.2); setTimeout(() => tone(780, 0.16, 'sine', 0.2), 130); },
+    defused() { tone(780, 0.12, 'sine', 0.2); setTimeout(() => tone(520, 0.18, 'sine', 0.2), 130); },
+    beep() { tone(950, 0.07, 'sine', 0.2); },
+    explosion() { noise(0.7, 0.6, 700); tone(70, 0.55, 'sine', 0.4, 30); },
+    grenadeThrow() { noise(0.12, 0.14, 1800); },
+    roundWin() { [523, 659, 784].forEach((f, i) => setTimeout(() => tone(f, 0.14, 'sine', 0.2), i * 110)); },
+    roundLose() { [392, 330, 262].forEach((f, i) => setTimeout(() => tone(f, 0.16, 'sine', 0.18), i * 120)); },
+    matchWin() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.18, 'sine', 0.22), i * 130)); },
+    step() { noise(0.04, 0.05, 700); },
   };
+  // PALETTE is referenced so the module stays part of the import graph
+  // even when a build only shakes the audio tree.
+  bank.accentCss = '#' + PALETTE.accent.toString(16).padStart(6, '0');
+  return bank;
 }

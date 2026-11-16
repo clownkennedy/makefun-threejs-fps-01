@@ -92,7 +92,7 @@ export function createRounds(callbacks) {
 
   function plant(siteIndex, planter) {
     if (state.phase !== 'live' || state.plant.state !== 'none') return false;
-    state.plant = { state: 'planted', siteIndex, siteNode: siteIndex === 0 ? 6 : 8, timer: MATCH.detonateTime, planter };
+    state.plant = { state: 'planted', siteIndex, siteNode: siteIndex === 0 ? 7 : 8, timer: MATCH.detonateTime, planter };
     callbacks.onPlanted(siteIndex);
     return true;
   }
