@@ -640,6 +640,7 @@ function drawMinimap() {
 }
 
 const losCheck = new THREE.Raycaster();
+const VIEW_DIST = 40;
 function canPlayerSee(bot) {
   const from = new THREE.Vector3(body.position.x, body.position.y + body.eye, body.position.z);
   const to = new THREE.Vector3(bot.position.x, bot.position.y + 1.1, bot.position.z);
@@ -650,7 +651,6 @@ function canPlayerSee(bot) {
   const hit = losCheck.intersectObjects(world.shootables, false)[0];
   return !hit;
 }
-const VIEW_DIST = 40;
 
 function buyItem(id) {
   if (rounds.state.phase !== 'buy') return;
